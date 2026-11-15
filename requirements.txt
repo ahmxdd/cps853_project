@@ -1,0 +1,4 @@
+pyarrow
+huggingface-hub
+kafka-python
+pytest
