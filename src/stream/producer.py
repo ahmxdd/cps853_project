@@ -1,5 +1,3 @@
-<<<<<<< Updated upstream
-=======
 """Publish prepared Statcast pitches to a Kafka topic in game order."""
 import argparse
 import json
@@ -145,4 +143,3 @@ def main():
 
 if __name__ == "__main__":
     main()
->>>>>>> Stashed changes

@@ -1,5 +1,3 @@
-<<<<<<< Updated upstream
-=======
 """Consume pitch messages from Kafka, check each one, and keep a running result in PostgreSQL.
 
 Running result (Part 2): pitches, strikeouts and top speed per game, in stream_pitch_counts.
@@ -336,4 +334,3 @@ def main():
 
 if __name__ == "__main__":
     main()
->>>>>>> Stashed changes
