@@ -63,8 +63,13 @@ def check_slice():
         return False
 
     d = ds.dataset(SLICE_DIR, partitioning="hive")
-    rows = d.count_rows()
-    print(f"Rows in {SLICE_DIR}: {rows:,} (expected {EXPECTED_SLICE_ROWS:,})")
+    good_rows = d.count_rows()
+    # prepare_data.py sets bad rows aside (Part 4); together they make up the slice.
+    bad_path = os.path.join("data", "quality", "bad_rows_batch.parquet")
+    bad_rows = raw_row_count(bad_path) if os.path.exists(bad_path) else 0
+    rows = good_rows + bad_rows
+    print(f"Rows in {SLICE_DIR}: {good_rows:,} + {bad_rows:,} set aside by quality checks "
+          f"= {rows:,} (expected {EXPECTED_SLICE_ROWS:,})")
 
     game_types = pc.value_counts(d.to_table(columns=["game_type"])["game_type"]).to_pylist()
     print("Rows per game_type:")
