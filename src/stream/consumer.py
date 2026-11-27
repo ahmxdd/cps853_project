@@ -1,6 +1,8 @@
 """Consume pitch messages from Kafka, check each one, and keep a running result in PostgreSQL.
 
-Running result (Part 2): pitches, strikeouts and top speed per game, in stream_pitch_counts.
+Running result (Part 2): pitches, strikeouts and top speed per game, in stream_pitch_counts,
+and pitches per game per inning, in stream_inning_counts. The data has a game date but no pitch
+time, so the inning is the game's clock: it stands in for the proposal's "per hour".
 Quality (Part 4): every message goes through src/quality/checks.py. Bad ones are set aside in
 the bad_rows table (not dropped), each check's failure count goes to quality_checks, and rows
 in / rows out go to stage_counts. An ALERT is printed when a check fails on too many rows.
@@ -24,6 +26,7 @@ from quality import checks  # noqa: E402
 
 STAGE = "6_stream_consume"
 STRIKEOUT_EVENTS = {"strikeout", "strikeout_double_play"}
+MAX_INNING_REPORTS = 5      # games whose per-inning counts are printed at the end
 
 
 def parse_args():
@@ -90,11 +93,13 @@ class StreamState:
         self.set_aside = 0
         self.counts_by_game = Counter()
         self.counts_by_date = Counter()
+        self.counts_by_inning = Counter()   # (game_pk, inning) -> pitches
         self.check_failures = Counter({name: 0 for name in checks.CHECKS})
         self.seen_keys = set()
         self.alerted = set()
         # waiting for the next database write
         self.pending_games = {}     # game_pk -> dict of increments
+        self.pending_innings = Counter()    # (game_pk, inning) -> pitches since last write
         self.pending_bad = []       # (failed_checks, pitch or raw text)
         self.pending_keys = []      # accepted pitches, for stream_seen_pitches
 
@@ -123,6 +128,9 @@ class StreamState:
         game = pitch["game_pk"]
         self.counts_by_game[game] += 1
         self.counts_by_date[pitch["game_date"]] += 1
+        inning = (game, int(pitch["inning"]))   # passed the checks, so inning is a whole number
+        self.counts_by_inning[inning] += 1
+        self.pending_innings[inning] += 1
         g = self.pending_games.setdefault(game, {
             "game_date": pitch["game_date"], "home_team": pitch.get("home_team"),
             "away_team": pitch.get("away_team"), "pitches": 0, "strikeouts": 0, "max_speed": None,
@@ -134,6 +142,11 @@ class StreamState:
         if speed is not None and (g["max_speed"] is None or speed > g["max_speed"]):
             g["max_speed"] = speed
         return pitch, []
+
+    def innings_for(self, game_pk):
+        """{inning: pitches} for one game, in inning order."""
+        return {inning: n for (g, inning), n in sorted(self.counts_by_inning.items())
+                if g == game_pk}
 
     def new_alerts(self):
         """Checks that have just gone over the alert threshold."""
@@ -164,6 +177,15 @@ def flush_to_db(conn, state):
                 (game_pk, g["game_date"], g["home_team"], g["away_team"],
                  g["pitches"], g["strikeouts"], g["max_speed"]),
             )
+        cur.executemany(
+            """
+            INSERT INTO stream_inning_counts (game_pk, inning, pitches)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (game_pk, inning) DO UPDATE SET
+                pitches = stream_inning_counts.pitches + EXCLUDED.pitches
+            """,
+            [(game_pk, inning, n) for (game_pk, inning), n in state.pending_innings.items()],
+        )
         cur.executemany(
             """INSERT INTO stream_seen_pitches (game_pk, at_bat_number, pitch_number)
                VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
@@ -207,6 +229,7 @@ def flush_to_db(conn, state):
         )
     conn.commit()
     state.pending_games.clear()
+    state.pending_innings.clear()
     state.pending_bad.clear()
     state.pending_keys.clear()
 
@@ -296,6 +319,10 @@ def main():
                             f"({state.passed:,} passed, {state.set_aside:,} set aside); "
                             f"games so far: {len(state.counts_by_game):,}"
                         )
+                        if not failed:
+                            game = row["game_pk"]
+                            print(f"  game {game} pitches by inning: "
+                                  f"{state.innings_for(game)}")
                     if since_flush >= args.flush_every:
                         flush()
                     if args.max_messages is not None and state.consumed >= args.max_messages:
@@ -326,6 +353,11 @@ def main():
         f"{dict(sorted(state.counts_by_date.items()))}; "
         f"counts by game: {dict(sorted(state.counts_by_game.items()))}"
     )
+    games = sorted(state.counts_by_game)
+    for game in games[:MAX_INNING_REPORTS]:
+        print(f"Game {game} pitches by inning: {state.innings_for(game)}")
+    if len(games) > MAX_INNING_REPORTS:
+        print(f"(pitches by inning for all {len(games):,} games are in stream_inning_counts)")
     checks.print_check_table(
         [(name, state.consumed, n) for name, n in state.check_failures.items()],
         f"Quality checks on the stream ({state.passed:,} passed, {state.set_aside:,} set aside)",

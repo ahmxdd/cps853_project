@@ -1,12 +1,10 @@
-<<<<<<< Updated upstream
-=======
 # Kafka (Part 2) and PostgreSQL (Parts 2-4), reachable from the laptop at
 # localhost:9092 and localhost:5432.
 # Start: docker compose up -d   (run_all.py does this for you)
 # Stop: docker compose down     Stop and delete all data too: docker compose down -v
 services:
   kafka:
-    image: apache/kafka:3.9.0
+    image: apache/kafka:4.4.0
     container_name: cps853-kafka
     ports:
       - "9092:9092"
@@ -30,4 +28,3 @@ services:
 
 volumes:
   pgdata:
->>>>>>> Stashed changes

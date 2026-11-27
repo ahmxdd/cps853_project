@@ -29,6 +29,15 @@ CREATE TABLE IF NOT EXISTS stream_pitch_counts (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Part 2: pitches per game per inning. The data has no pitch time, so the inning is the
+-- game's clock (it stands in for "pitches per hour").
+CREATE TABLE IF NOT EXISTS stream_inning_counts (
+    game_pk   BIGINT NOT NULL,
+    inning    INTEGER NOT NULL,
+    pitches   INTEGER NOT NULL,
+    PRIMARY KEY (game_pk, inning)
+);
+
 -- Part 2/4: every pitch the stream has accepted, so a replayed pitch is caught as a
 -- duplicate even after the consumer restarts.
 CREATE TABLE IF NOT EXISTS stream_seen_pitches (
@@ -95,7 +104,7 @@ def connect():
 def reset_stream_tables(conn):
     """Empty the stream's running result (run_all.py does this so each run starts clean)."""
     with conn.cursor() as cur:
-        cur.execute("TRUNCATE stream_pitch_counts, stream_seen_pitches")
+        cur.execute("TRUNCATE stream_pitch_counts, stream_inning_counts, stream_seen_pitches")
     conn.commit()
 
 

@@ -16,12 +16,7 @@ The full file is much more than we need, so we cut it down:
 - Columns: 22 of the original 118
 - Result: 2,177,472 rows (720,272 in 2022, 729,774 in 2023, 727,426 in 2024)
 - Order: sorted by `game_date, game_pk, at_bat_number, pitch_number` so the rows are in the order the pitches were thrown
-<<<<<<< Updated upstream
-<!-- 
-## Requirements
-=======
 ## Quick start (from a fresh copy)
->>>>>>> Stashed changes
 
 With Python, Java and Docker Desktop installed and running (see Setup):
 
@@ -45,11 +40,6 @@ You need:
 - **Docker Desktop**, running (Kafka and PostgreSQL run in it)
 - About 2 GB of free disk space for the data
 
-<<<<<<< Updated upstream
-```
-pip install -r requirements.txt
-``` -->
-=======
 Then, from the repo root (the virtual environment is optional but recommended):
 
 ```
@@ -69,7 +59,6 @@ curl.exe -L -o C:\hadoop\bin\hadoop.dll https://github.com/kontext-tech/winutils
 ```
 
 `spark_jobs.py` looks in `C:\hadoop\bin` by itself, so no environment variables are needed. If the downloads fail, get the two files by hand from the [kontext-tech/winutils bin folder](https://github.com/kontext-tech/winutils/tree/master/hadoop-3.4.0-win10-x64/bin).
->>>>>>> Stashed changes
 
 ## Getting the data
 
@@ -167,8 +156,6 @@ File sizes for the two formats are printed by `prepare_data.py`.
 
 ## Part 2: Stream
 
-<<<<<<< Updated upstream
-=======
 Kafka and PostgreSQL run in Docker; the producer and consumer are plain Python.
 
 **1. Start Kafka and PostgreSQL** (Docker Desktop must be running; the first start downloads the images):
@@ -205,6 +192,13 @@ Other options:
 | `python -m pytest tests -v` | Sends one game through Kafka and checks that all 300 pitches arrive (skipped if Kafka is not running) |
 
 **Restarts.** The consumer commits its Kafka position only after the database has been updated. If it is stopped and started again with the same `--group-id`, it carries on where it stopped without losing rows. Every accepted pitch is recorded in `stream_seen_pitches`, so a pitch that is replayed is set aside as a duplicate instead of being counted twice.
+
+**Notes on the stream.**
+
+- Each message is keyed by `game_pk`, so Kafka keeps the pitches of one game in order.
+- Kafka does not deduplicate messages: running the producer again appends another copy to the topic. For demos, use a separate topic, for example `--topic pitches-demo` on both the producer and the consumer.
+- The dataset has a game date but no pitch time, so pitches per hour cannot be measured. The inning is used as the game's clock instead: the consumer keeps pitches per game per inning in `stream_inning_counts`, prints them with each progress line and at the end, and also reports totals by date. `--delay-seconds` only simulates arrival pacing.
+- `tests/test_stream_integration.py` creates its own temporary topic, streams the 300-pitch sample game through it with `--no-db`, and deletes the topic afterwards. It never writes to `pitches`.
 
 Stop Kafka and PostgreSQL with `docker compose down`. This deletes the Kafka topic; the database is kept. `docker compose down -v` deletes the database too.
 
@@ -245,7 +239,6 @@ python src/quality/show_quality.py                   # the counts and the rows s
 The test rows use `game_pk` 999999 and the player "Test, Pitcher", so they cannot be mistaken for real pitches.
 
 ## Database connection
->>>>>>> Stashed changes
 
 PostgreSQL runs in Docker at `localhost:5432`, database `cps853`, user `cps853`, password `cps853` (local only). `src/common/db.py` has a `connect()` helper; the settings can be changed with `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD`. To look around: `docker exec -it cps853-postgres psql -U cps853`.
 
