@@ -82,6 +82,10 @@ def test_producer_consumer_stream_one_game():
                 f"{{'{GAME_DATE}': {EXPECTED_PITCH_COUNT}}}; counts by game: "
                 f"{{{GAME_PK}: {EXPECTED_PITCH_COUNT}}}"
             ) in consumer.stdout
+            assert (
+                f"Game {GAME_PK} pitches by inning: "
+                f"{{1: 27, 2: 29, 3: 56, 4: 29, 5: 29, 6: 26, 7: 33, 8: 33, 9: 38}}"
+            ) in consumer.stdout
         finally:
             deleted = admin.delete_topics([topic], timeout_ms=10000)
             assert deleted["topics"][0]["error_code"] == 0

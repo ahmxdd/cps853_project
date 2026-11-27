@@ -197,7 +197,7 @@ Other options:
 
 - Each message is keyed by `game_pk`, so Kafka keeps the pitches of one game in order.
 - Kafka does not deduplicate messages: running the producer again appends another copy to the topic. For demos, use a separate topic, for example `--topic pitches-demo` on both the producer and the consumer.
-- The dataset has a game date but no pitch time, so the consumer reports totals by date, not per hour. `--delay-seconds` only simulates arrival pacing.
+- The dataset has a game date but no pitch time, so pitches per hour cannot be measured. The inning is used as the game's clock instead: the consumer keeps pitches per game per inning in `stream_inning_counts`, prints them with each progress line and at the end, and also reports totals by date. `--delay-seconds` only simulates arrival pacing.
 - `tests/test_stream_integration.py` creates its own temporary topic, streams the 300-pitch sample game through it with `--no-db`, and deletes the topic afterwards. It never writes to `pitches`.
 
 Stop Kafka and PostgreSQL with `docker compose down`. This deletes the Kafka topic; the database is kept. `docker compose down -v` deletes the database too.
