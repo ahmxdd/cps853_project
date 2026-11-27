@@ -9,11 +9,17 @@ Usage (from the repo root):
 """
 import argparse
 import os
+import shutil
+import sys
 import time
 
+import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from quality import checks  # noqa: E402  (Part 4)
 
 # The ~22 columns the three questions and the stream need.
 COLUMNS = [
@@ -44,6 +50,37 @@ def dir_size_mb(path):
     return total / 1e6
 
 
+def run_quality_checks(table, run_id):
+    """Run the Part 4 checks. Returns (good rows, bad rows) and writes the bad rows to
+    data/quality/bad_rows_batch.parquet with a failed_checks column saying why."""
+    t0 = time.time()
+    masks, any_failed = checks.check_table(table)
+    results = []
+    for name in checks.CHECKS:
+        failed = int(masks[name].sum()) if name in masks else 0
+        results.append((name, table.num_rows, failed))
+        checks.log_check(run_id, "2_quality_batch", name, table.num_rows, failed)
+    checks.print_check_table(results, f"Quality checks on the batch ({time.time() - t0:.1f}s)")
+    if masks["schema"].any():
+        for problem in checks.schema_problems(table):
+            print(f"  schema problem: {problem}")
+        sys.exit("ERROR: the data does not have the expected schema; stopping.")
+
+    bad_idx = pa.array(any_failed.nonzero()[0])
+    good = table.filter(pa.array(~any_failed))
+    bad = table.take(bad_idx)
+    reasons = [checks.failed_check_names(masks, i) for i in bad_idx.to_pylist()]
+    bad = bad.append_column("failed_checks", pa.array(reasons, pa.string()))
+    os.makedirs(checks.QUALITY_DIR, exist_ok=True)
+    pq.write_table(bad, checks.BAD_ROWS_BATCH)
+    checks.log_stage(run_id, "2_quality_batch", table.num_rows, good.num_rows, bad.num_rows)
+    print(f"{bad.num_rows:,} bad rows set aside in {checks.BAD_ROWS_BATCH}")
+    alerts = [r[0] for r in results if checks.is_alert(r[1], r[2])]
+    if alerts:
+        print(f"ALERT: more than {checks.ALERT_PCT}% of rows failed: {', '.join(alerts)}")
+    return good, bad
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw", default="data/raw/data/statcast_era_pitches.parquet")
@@ -57,6 +94,8 @@ def main():
     os.makedirs(os.path.dirname(csv_out), exist_ok=True)
 
     print(f"Raw file: {args.raw} ({dir_size_mb(args.raw):.0f} MB)")
+    run_id = checks.run_id_default()
+    raw_rows = pq.ParquetFile(args.raw).metadata.num_rows
 
     # 1. Read only the needed columns and years (pyarrow skips the rest).
     t0 = time.time()
@@ -70,9 +109,13 @@ def main():
 ],
     )
     print(f"Read {table.num_rows:,} rows x {table.num_columns} cols in {time.time() - t0:.1f}s")
+    checks.log_stage(run_id, "1_slice_filter", raw_rows, table.num_rows)
 
     # 2. Sort into event-time order.
     table = table.sort_by(SORT_KEYS)
+
+    # 2b. Part 4: quality checks. Bad rows are set aside, not dropped.
+    table, bad = run_quality_checks(table, run_id)
 
     # 3. Rows per year (check the 1,000,000 minimum!).
     years = pc.value_counts(table["game_year"]).to_pylist()
@@ -82,6 +125,9 @@ def main():
         print("WARNING: under 1,000,000 rows. Widen --min-year.")
 
     # 4. Save as Parquet, partitioned by game_year.
+    #    Start from an empty folder: write_to_dataset adds files rather than replacing them.
+    if os.path.isdir(parquet_out):
+        shutil.rmtree(parquet_out)
     t0 = time.time()
     pq.write_to_dataset(table, parquet_out, partition_cols=["game_year"])
     print(f"Parquet written in {time.time() - t0:.1f}s")
@@ -90,6 +136,7 @@ def main():
     t0 = time.time()
     pacsv.write_csv(table, csv_out)
     print(f"CSV written in {time.time() - t0:.1f}s")
+    checks.log_stage(run_id, "3_store_parquet_csv", table.num_rows, table.num_rows)
 
     # 6. Size comparison for the report and the video.
     print("\n--- File sizes ---")

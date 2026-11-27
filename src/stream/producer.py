@@ -1,6 +1,8 @@
 """Publish prepared Statcast pitches to a Kafka topic in game order."""
 import argparse
 import json
+import os
+import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -22,17 +24,25 @@ ORDER_COLUMNS = [
 ]
 BATCH_SIZE = 1000
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from quality import checks  # noqa: E402  (Part 4: rows in / rows out)
 
-def load_pitches(data_dir, year, game_pk=None):
-    """Load and order one season, optionally narrowed to a single game."""
+
+def load_pitches(data_dir, year, game_pk=None, game_date=None):
+    """Load and order one season, optionally narrowed to a single game or a single day."""
     dataset = ds.dataset(data_dir, format="parquet", partitioning="hive")
     predicate = ds.field("game_year") == year
     if game_pk is not None:
         predicate = predicate & (ds.field("game_pk") == game_pk)
 
     pitches = dataset.to_table(columns=PITCH_COLUMNS, filter=predicate)
+    if game_date is not None:
+        import pyarrow.compute as pc
+        day = pc.utf8_slice_codeunits(pc.cast(pitches["game_date"], "string"), 0, 10)
+        pitches = pitches.filter(pc.equal(day, game_date))
     if pitches.num_rows == 0:
         selection = f" for game {game_pk}" if game_pk is not None else ""
+        selection += f" on {game_date}" if game_date is not None else ""
         raise ValueError(f"No pitches found for {year}{selection} in {data_dir}")
     return pitches.sort_by(ORDER_COLUMNS)
 
@@ -55,6 +65,8 @@ def parse_args():
                         help="season to stream (default: %(default)s)")
     parser.add_argument("--game-pk", type=int,
                         help="limit the stream to one game")
+    parser.add_argument("--date",
+                        help="limit the stream to one day, e.g. 2024-03-28 (its year must be --year)")
     parser.add_argument("--topic", default="pitches",
                         help="Kafka topic (default: %(default)s)")
     parser.add_argument("--bootstrap-server", default="localhost:9092",
@@ -74,7 +86,7 @@ def main():
     if not Path(args.data_dir).is_dir():
         raise FileNotFoundError(f"Parquet dataset directory not found: {args.data_dir}")
 
-    pitches = load_pitches(args.data_dir, args.year, args.game_pk)
+    pitches = load_pitches(args.data_dir, args.year, args.game_pk, args.date)
     if args.dry_run:
         first, last = pitches.slice(0, 1).to_pylist()[0], pitches.slice(
             pitches.num_rows - 1, 1
@@ -126,6 +138,7 @@ def main():
         producer.close(timeout=30)
 
     print(f"Sent {sent:,} pitches to {args.topic} at {args.bootstrap_server}")
+    checks.log_stage(checks.run_id_default(), "5_stream_produce", pitches.num_rows, sent)
 
 
 if __name__ == "__main__":

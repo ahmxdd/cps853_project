@@ -1,5 +1,30 @@
+# Kafka (Part 2) and PostgreSQL (Parts 2-4), reachable from the laptop at
+# localhost:9092 and localhost:5432.
+# Start: docker compose up -d   (run_all.py does this for you)
+# Stop: docker compose down     Stop and delete all data too: docker compose down -v
 services:
   kafka:
     image: apache/kafka:4.4.0
+    container_name: cps853-kafka
     ports:
       - "9092:9092"
+
+  postgres:
+    image: postgres:16
+    container_name: cps853-postgres
+    environment:
+      POSTGRES_DB: cps853
+      POSTGRES_USER: cps853
+      POSTGRES_PASSWORD: cps853
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cps853 -d cps853"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

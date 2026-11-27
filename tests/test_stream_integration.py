@@ -69,6 +69,7 @@ def test_producer_consumer_stream_one_game():
                     "--bootstrap-server", BOOTSTRAP_SERVER,
                     "--group-id", f"pytest-{uuid.uuid4().hex}",
                     "--max-messages", str(EXPECTED_PITCH_COUNT),
+                    "--no-db",      # earlier runs in the database must not affect this test
                 ],
                 cwd=ROOT,
                 capture_output=True,
